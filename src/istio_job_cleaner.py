@@ -13,7 +13,7 @@ common_pod_name = ""
 
 def get_jobs():
     """
-    This pulls all jobs in the declared namespace that have "runner"
+    This pulls all jobs in the declared namespace that have common_job_name
     in their name and are actively running, formats their names and
     UIDs into a dict for further processing in the handle_jobs function
 
@@ -23,7 +23,7 @@ def get_jobs():
     references to list indices. It's not pretty and should be refactored
     in the near future.
 
-    returns: job_dict, dictionary of active runner jobs where
+    returns: job_dict, dictionary of active jobs w/common_job_name where
     key: job-name, value: job-uid
     """
     job_list = list()
@@ -47,7 +47,7 @@ def get_jobs():
         jobs_json = loads(jobs_obj.data)
         job_list.append(jobs_json)
 
-    # Pull runner specific jobs out of the list and add their name, uid to a dict.
+    # Pull common_job_name specific jobs out of the list and add their name, uid to a dict.
     for i in range(len(job_list)):
         if (common_job_name in job_list[i].get("items")[0].get("metadata", {}).get("name") and
             job_list[i].get("items")[0].get("status", {}).get("active") is not None):
@@ -58,8 +58,8 @@ def get_jobs():
 
 def handle_jobs(jobs):
     """
-    Creates a list of all pods in the namespace with "runner" in the
-    name, iterates over the containers in the pod to ensure only
+    Creates a list of all pods in the namespace with common_pod_name
+    in the name, iterates over the containers in the pod to ensure only
     istio-proxy is running and the others are completed, not failed
     or in some other state, then matches the pod owner uid to the
     job uid passed into it from the above function and if a match
