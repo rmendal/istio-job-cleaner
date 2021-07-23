@@ -10,5 +10,5 @@ This was built with the idea that the job names and pod names would have a commo
 ## How To Use
 * Set the variables on lines 9-11.
 * Build the container.
-* Create a service acocunt, role and role binding so the container can get/list/delete jobs.
+* Create a service acocunt, role and role binding so the container can get/list/delete jobs/pods.
 * Deploy it via cronjob
