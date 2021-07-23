@@ -32,7 +32,7 @@ def get_jobs():
                                            _preload_content=False, limit=1)
     jobs_json = loads(jobs_obj.data)
 
-    # If no jobs or no jobs, exit. Else add those jobs to the list
+    # If no jobs, exit. Else add those jobs to the list.
     if not jobs_json.get("items"):
         exit(0)
     else:

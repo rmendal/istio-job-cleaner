@@ -7,6 +7,7 @@ If the job or non-istio container(s) are in a state of running, active, failed, 
 
 This was built with the idea that the job names and pod names would have a common word in their names. The word in the job name does NOT have to match the common word in the pod name. This was an easier way to identify jobs/pods of interest and this app can be easily modified to check all jobs/pods if needed.
 
+It's worth noting that this was built in a hurry and the code is ugly and while it tries to follow PEP 8 standards it runs afoul of the line length standard. I'll refactor this eventually or just rewrite this in Go.
 ## How To Use
 * Set the variables on lines 9-11.
 * Build the container.
