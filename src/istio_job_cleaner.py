@@ -1,19 +1,22 @@
 from kubernetes import client, config
 from json import loads
 from sys import exit
+from threading import Thread
 
 config.load_incluster_config()
+# Use the below for local testing
+# config.load_kube_config()
 
 v1 = client.CoreV1Api()
 batchv1 = client.BatchV1Api()
-namespace = ""
-common_job_name = ""
-common_pod_name = ""
+namespace = "zn-dev"
+common_job_name = "runner"
+common_pod_name = "runner"
 
 
-def get_jobs():
+def process_jobs():
     """
-    This pulls all jobs in the declared namespace that have common_job_name
+    This pulls all jobs in the declared namespace that have "runner"
     in their name and are actively running, formats their names and
     UIDs into a dict for further processing in the handle_jobs function
 
@@ -23,85 +26,114 @@ def get_jobs():
     references to list indices. It's not pretty and should be refactored
     in the near future.
 
-    returns: job_dict, dictionary of active jobs w/common_job_name where
+    returns: job_dict, dictionary of active runner jobs where
     key: job-name, value: job-uid
     """
     job_list = list()
-    job_dict = dict()
     jobs_obj = batchv1.list_namespaced_job(namespace=namespace,
-                                           _preload_content=False, limit=1)
+                                           _preload_content=False,
+                                           limit=1,
+                                           )
     jobs_json = loads(jobs_obj.data)
 
-    # If no jobs, exit. Else add those jobs to the list.
-    if not jobs_json.get("items"):
+    # If no jobs or no jobs, exit. Else add those jobs to the list
+    if not jobs_json.get("items", {}):
         exit(0)
     else:
         job_list.append(jobs_json)
 
     # Loop over the http response so all jobs are added to the list
     # and aren't just one long http response.
-    while jobs_json.get("metadata", {}).get("continue") is not None:
-        jobs_obj = batchv1.list_namespaced_job(namespace=namespace,
-                                               _preload_content=False, limit=1,
-                                               _continue=jobs_json.get("metadata", {}).get("continue"))
-        jobs_json = loads(jobs_obj.data)
-        job_list.append(jobs_json)
+    threads = []
+    while job_list:
+        job = job_list.pop()
+        job_items = job.get("items", [{}])[0]
+        job_metadata = job_items.get("metadata", {})
+        job_status = job_items.get("status")
 
-    # Pull common_job_name specific jobs out of the list and add their name, uid to a dict.
-    for i in range(len(job_list)):
-        if (common_job_name in job_list[i].get("items")[0].get("metadata", {}).get("name") and
-            job_list[i].get("items")[0].get("status", {}).get("active") is not None):
-            job_dict[job_list[i].get("items")[0].get("metadata", {}).get("name")] = job_list[i].get("items")[0].get("metadata", {}).get("uid")
+        job_dict = dict()
+        if (common_job_name in job_metadata.get("name") and job_status.get("active")):
+            job_dict[job_metadata.get("name")] = job_metadata.get("uid")
 
-    return(job_dict)
+        thread = Thread(target=handle_jobs, args=(job_dict, ))
+        threads.append(thread)
+        thread.start()
+
+        if jobs_json.get("metadata", {}).get("continue"):
+            jobs_obj = batchv1.list_namespaced_job(
+                namespace=namespace,
+                _preload_content=False, limit=1,
+                _continue=jobs_json.get("metadata", {}).get("continue")
+            )
+            jobs_json = loads(jobs_obj.data)
+            job_list.append(jobs_json)
+
+    # keeps the threads active until we kill them
+    for thr in threads:
+        thr.join()
 
 
 def handle_jobs(jobs):
     """
-    Creates a list of all pods in the namespace with common_pod_name
-    in the name, iterates over the containers in the pod to ensure only
+    Creates a list of all pods in the namespace with "runner" in the
+    name, iterates over the containers in the pod to ensure only
     istio-proxy is running and the others are completed, not failed
     or in some other state, then matches the pod owner uid to the
     job uid passed into it from the above function and if a match
     is found, deletes the job.
     """
     pod_list = list()
-    pods_obj = v1.list_namespaced_pod(namespace=namespace, _preload_content=False, limit=1)
+    pods_obj = v1.list_namespaced_pod(
+        namespace=namespace,
+        _preload_content=False,
+        limit=1,
+    )
     pods_json = loads(pods_obj.data)
     pod_list.append(pods_json)
-    while pods_json.get("metadata", {}).get("continue") is not None:
-        pods_obj = v1.list_namespaced_pod(namespace=namespace, _preload_content=False,
-                                          limit=1, _continue=pods_json.get("metadata", {}).get("continue"))
-        pods_json = loads(pods_obj.data)
-        pod_list.append(pods_json)
 
-    for i in range(len(pod_list)):
-        if common_pod_name in pod_list[i].get("items")[0].get("metadata", {}).get("name"):
+    while pod_list:
+        pod = pod_list.pop()
+        pod_items = pod.get("items", [{}])[0]
+        pod_metadata = pod_items.get("metadata", {})
+
+        if common_pod_name in pod_metadata.get("name"):
             count = 0
-            for j in range(len(pod_list[i].get("items")[0].get("status", {}).get("containerStatuses"))):
-                if ("istio-proxy" not in pod_list[i].get("items")[0].get("status", {}).get("containerStatuses")[j].get("name") and
-                    pod_list[i].get("items")[0].get("status", {}).get("containerStatuses")[j].get("state", {}).get("terminated", {}).get("finishedAt") is not None
-                    and pod_list[i].get("items")[0].get("status", {}).get("containerStatuses")[j].get("state", {}).get("terminated", {}).get("exitCode") == 0):
+
+            container_statuses_list = pod_items.get("status", {}).get("containerStatuses", [])
+            for j, container_statuses in enumerate(container_statuses_list):
+                terminated_meta = container_statuses.get("state", {}).get("terminated", {})
+                name = container_statuses.get("name")
+                finishedAt = terminated_meta.get("finishedAt")
+                exitCode = terminated_meta.get("exitCode")
+
+                if ("istio-proxy" not in name and finishedAt and exitCode == 0):
                     count += 1
-                    if count == (len(pod_list[i].get("items")[0].get("status", {}).get("containerStatuses")) - 1):
+                    if count == (len(container_statuses_list) - 1):
                         for k, v in jobs.items():
-                            if pod_list[i].get("items")[0].get("metadata", {}).get("ownerReferences")[0].get("uid") == v:
-                                print(f"delete called on {k}")
-                                batchv1.delete_namespaced_job(name=k, namespace=namespace, propagation_policy="Background")
+                            if pod_metadata.get("ownerReferences", [{}])[0].get("uid") == v:
+                                print(f"delete called on {k} - {name}, {finishedAt}, {exitCode}")
+                                batchv1.delete_namespaced_job(
+                                    name=k,
+                                    namespace=namespace,
+                                    propagation_policy="Background",)
+                                return
                             else:
                                 continue
                     else:
                         continue
                 else:
                     continue
-        else:
-            continue
 
-
-def main():
-    jobs = get_jobs()
-    handle_jobs(jobs)
+        if pod.get("metadata", {}).get("continue"):
+            pods_obj = v1.list_namespaced_pod(
+                namespace=namespace,
+                _preload_content=False,
+                limit=1,
+                _continue=pod.get("metadata", {}).get("continue"),
+            )
+            pods_json = loads(pods_obj.data)
+            pod_list.append(pods_json)
 
 
 if __name__ == '__main__':
-    main()
+    process_jobs()
