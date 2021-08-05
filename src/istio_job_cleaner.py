@@ -9,24 +9,22 @@ config.load_incluster_config()
 
 v1 = client.CoreV1Api()
 batchv1 = client.BatchV1Api()
-namespace = "zn-dev"
-common_job_name = "runner"
-common_pod_name = "runner"
+namespace = ""
+common_job_name = ""
+common_pod_name = ""
 
 
 def process_jobs():
     """
-    This pulls all jobs in the declared namespace that have "runner"
+    This pulls all jobs in the declared namespace that have common_job_name
     in their name and are actively running, formats their names and
     UIDs into a dict for further processing in the handle_jobs function
-
     The kubernetes library returns an http response on all api calls.
     The data appears as JSON but isn't actually valid. It required a
     lot of lengthy conditionals and "get" methods with occasional
     references to list indices. It's not pretty and should be refactored
     in the near future.
-
-    returns: job_dict, dictionary of active runner jobs where
+    returns: job_dict, dictionary of active jobs w/common_job_name where
     key: job-name, value: job-uid
     """
     job_list = list()
@@ -68,15 +66,15 @@ def process_jobs():
             jobs_json = loads(jobs_obj.data)
             job_list.append(jobs_json)
 
-    # keeps the threads active until we kill them
+    # Keep the threads active until we kill them.
     for thr in threads:
         thr.join()
 
 
 def handle_jobs(jobs):
     """
-    Creates a list of all pods in the namespace with "runner" in the
-    name, iterates over the containers in the pod to ensure only
+    Creates a list of all pods in the namespace with common_pod_name
+    in the name, iterates over the containers in the pod to ensure only
     istio-proxy is running and the others are completed, not failed
     or in some other state, then matches the pod owner uid to the
     job uid passed into it from the above function and if a match
