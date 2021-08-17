@@ -1,0 +1,62 @@
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: istio-job-cleaner
+  namespace: foo
+spec:
+  schedule: "*/1 * * * *"
+  concurrencyPolicy: "Allow"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  startingDeadlineSeconds: 90
+  suspend: False
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            sidecar.istio.io/inject: "false"
+        spec:
+          serviceAccountName: istio-job-cleaner
+          containers:
+          - name: istio-job-cleaner
+            image: yourrepo/istio-job-cleaner:0.1
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: NAMESPACE
+              value: "foo"
+          restartPolicy: OnFailure
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: istio-job-cleaner
+  namespace: foo
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: istio-job-cleaner
+  namespace: foo
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["*"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: istio-job-cleaner
+  namespace: foo
+subjects:
+- kind: ServiceAccount
+  name: istio-job-cleaner
+  namespace: foo
+roleRef:
+  kind: Role
+  name: istio-job-cleaner
+  apiGroup: ""
