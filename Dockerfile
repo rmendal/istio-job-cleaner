@@ -12,4 +12,7 @@ RUN apt update && apt upgrade -y && \
     pip3 install -r requirements.txt && \
     rm $APPDIR/requirements.txt
 
+RUN useradd cleaner && groupadd cleaner
+USER cleaner:cleaner
+
 ENTRYPOINT [ "python3", "-m", "istio_job_cleaner" ]
